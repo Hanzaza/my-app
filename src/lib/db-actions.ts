@@ -54,15 +54,11 @@ const newProduct = await prisma.product.create({
 }
 
 export async function getProducts(userId: string) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { companyId: true }
-  });
-
-  if (!user || !user.companyId) return [];
+  const companyId = await getCompanyIdForUser(userId);
+  if (!companyId) return [];
 
   const products = await prisma.product.findMany({ 
-    where: { companyId: user.companyId } 
+    where: { companyId: companyId } 
   });
   
   return products.map(p => ({
@@ -274,15 +270,11 @@ export async function getUsers(companyId: string) {
 export async function getClosedReconciliations(_companyId: string) { return []; }
 
 export async function getCategories(userId: string) {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { companyId: true }
-  });
-
-  if (!user || !user.companyId) return [];
+  const companyId = await getCompanyIdForUser(userId);
+  if (!companyId) return [];
 
   const categories = await prisma.category.findMany({
-    where: { companyId: user.companyId }
+    where: { companyId: companyId }
   });
 
   return categories.map(c => ({
