@@ -1,9 +1,27 @@
-src/generated
+# Generated files
+src/generated/
 
-.env
-.env.local
+# Dependencies
 node_modules
 
 # Next.js build output
 .next
+out/
+
+# Local Environment Variables
+# Ignore all .env files except for .env.example.
+.env*
+!.env.example
+
+# Log files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Temporary files (like the one you had)
 tmp-link.cmd
+
+# OS-generated files
+.DS_Store
+Thumbs.db

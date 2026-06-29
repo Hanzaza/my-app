@@ -1,7 +1,22 @@
 'use server';
 
 import { prisma } from './prisma';
-import { Prisma } from '../../generated/prisma';
+import { Prisma, Product } from '../../generated/prisma';
+
+// Helper para transformar el producto para el frontend
+function mapProductForClient(product: Product) {
+  return {
+    ...product,
+    quantity: Number(product.quantity),
+    stockQuantity: Number(product.quantity), // Asumiendo que stockQuantity es un alias de quantity
+    purchaseCost: Number(product.purchaseCost),
+    salePrice: Number(product.salePrice),
+    lowStockThreshold: product.lowStockThreshold,
+    categoryId: product.categoryId || '',
+    imageUrl: '', // Si tienes una lógica para esto, iría aquí
+    stockingUnit: product.stockingUnit as "unidad" | "lb" | "oz" | "L" | "kg" | "qq",
+  };
+}
 
 // 1. Creamos el molde para eliminar los 'any'
 export interface ProductPayload {
@@ -23,16 +38,21 @@ export interface ProductPayload {
  */
 export async function addProduct(data: ProductPayload) {
   try {
+    // Validación de entrada: Es más seguro que usar el operador '!'
+    if (!data.name || !data.companyId) {
+      throw new Error('El nombre del producto y el ID de la compañía son obligatorios.');
+    }
+
     const stockingUnit = data.stockingUnit || data.storageUnit || 'unidad';
     const quantity = data.quantity !== undefined ? data.quantity : (data.stockQuantity || 0);
 
     // En db-actions.ts -> addProduct
 const newProduct = await prisma.product.create({
   data: {
-    name: data.name!,
-    companyId: data.companyId!,
-    stockingUnit: data.stockingUnit || 'unidad',
-    quantity: data.quantity || 0,
+    name: data.name,
+    companyId: data.companyId,
+    stockingUnit: stockingUnit,
+    quantity: quantity,
     categoryId: data.categoryId || null,
     purchaseCost: Number(data.purchaseCost) || 0, // Asegúrate de tener estas líneas
     salePrice: Number(data.salePrice) || 0,
@@ -40,13 +60,7 @@ const newProduct = await prisma.product.create({
   },
 });
 
-    return {
-      ...newProduct,
-      quantity: Number(newProduct.quantity),
-      stockQuantity: Number(newProduct.quantity),
-      purchaseCost: Number(newProduct.purchaseCost),
-      salePrice: Number(newProduct.salePrice)
-    };
+    return mapProductForClient(newProduct);
   } catch (error) {
     console.error('Error al insertar producto:', error);
     throw new Error('No se pudo crear el producto');
@@ -61,18 +75,7 @@ export async function getProducts(userId: string) {
     where: { companyId: companyId } 
   });
   
-  return products.map(p => ({
-    ...p,
-    quantity: Number(p.quantity),
-    stockQuantity: Number(p.quantity),
-    // ¡Adiós a los ceros fijos! Ahora leemos la base de datos real:
-    lowStockThreshold: p.lowStockThreshold,
-    purchaseCost: Number(p.purchaseCost),
-    salePrice: Number(p.salePrice),
-    categoryId: p.categoryId || '', 
-    imageUrl: '',
-    stockingUnit: p.stockingUnit as "unidad" | "lb" | "oz" | "L" | "kg" | "qq",
-  }));
+  return products.map(mapProductForClient);
 }
 
 export async function updateProduct(id: string, data: ProductPayload, userId: string) {
@@ -104,13 +107,7 @@ export async function updateProduct(id: string, data: ProductPayload, userId: st
       data: dataToUpdate,
     });
     
-    return {
-      ...updatedProduct,
-      quantity: Number(updatedProduct.quantity),
-      stockQuantity: Number(updatedProduct.quantity),
-      purchaseCost: Number(updatedProduct.purchaseCost),
-      salePrice: Number(updatedProduct.salePrice)
-    };
+    return mapProductForClient(updatedProduct);
   } catch (error) {
     // Modificamos esto para que puedas ver exactamente qué campo o restricción está fallando
     console.error('Error al actualizar producto:', error);
