@@ -1,0 +1,9 @@
+src/generated
+
+.env
+.env.local
+node_modules
+
+# Next.js build output
+.next
+tmp-link.cmd

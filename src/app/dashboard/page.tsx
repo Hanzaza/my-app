@@ -1,0 +1,465 @@
+"use client";
+
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import StatCard from '@/components/dashboard/stat-card';
+import { Product, Sale, CashOutflow } from '@/lib/types';
+import { getProducts, getSales, getCashOutflows } from '@/lib/db-actions';
+import { useAuth } from '@/context/auth-context-new';
+import { DollarSign, Package, AlertTriangle, ShoppingCart, TrendingUp, BarChart3, Eye, Flag, PackagePlus, Wallet } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { isToday, format, isSameDay, formatDistanceToNow } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { SidebarTrigger } from '@/components/ui/sidebar';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+
+export default function DashboardPage() {
+  const { user, loading: authLoading } = useAuth();
+  const [products, setProducts] = useState<Product[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [outflows, setOutflows] = useState<CashOutflow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentDate, setCurrentDate] = useState('');
+  const { toast } = useToast();
+  const router = useRouter();
+
+  const isAdmin = user?.role?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'primary-admin';
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const today = new Date();
+      const formattedDate = format(today, "eeee, d 'de' MMMM 'de' yyyy", { locale: es });
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCurrentDate(formattedDate.charAt(0).toUpperCase() + formattedDate.slice(1));
+    }
+  }, []);
+
+  const fetchData = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const [rawProducts, rawSales, outflowsData] = await Promise.all([
+        getProducts(user.uid),
+        getSales(user.uid),
+        getCashOutflows(user.uid)
+      ]);
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const formattedProducts = rawProducts.map((p: any) => ({
+        ...p,
+        quantity: Number(p.stockQuantity || p.quantity || 0), 
+        salePrice: Number(p.salePrice || 0),
+        purchaseCost: Number(p.purchaseCost || 0),
+      })) as Product[];
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const formattedSales = rawSales.map((s: any) => ({
+        ...s,
+        grandTotal: Number(s.grandTotal || 0),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        items: s.items ? s.items.map((item: any) => ({
+            ...item,
+            quantity: Number(item.quantity || 0),
+            salePrice: Number(item.salePrice || 0)
+        })) : []
+      })) as Sale[];
+
+      setProducts(formattedProducts);
+      setSales(formattedSales);
+      setOutflows(outflowsData);
+    } catch (error) {
+      console.error("Dashboard fetch error:", error);
+      toast({ variant: 'destructive', title: 'Error', description: 'No se pudieron cargar los datos del panel de control.' });
+    } finally {
+      setLoading(false);
+    }
+  }, [toast, user]);
+
+  useEffect(() => {
+    if (!authLoading && user) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      fetchData();
+    } else if (!authLoading && !user) {
+      setLoading(false);
+    }
+  }, [user, authLoading, fetchData]);
+
+  const formatCurrency = (amount: number, currency: 'NIO' | 'USD' = 'NIO') =>
+    new Intl.NumberFormat("es-NI", {
+      style: "currency",
+      currency: currency,
+    }).format(amount);
+
+  const {
+    todayRevenue,
+    todaySalesCount,
+    totalProducts,
+    lowStockProducts,
+    employeeTodaySales,
+    todayProfit,
+    recentSales,
+    salesForReview,
+    availableProfit,
+  } = useMemo(() => {
+    const today = new Date();
+    const todaySales = sales.filter(sale => isSameDay(new Date(sale.date), today));
+    const todayRevenue = todaySales.reduce((acc, sale) => acc + sale.grandTotal, 0);
+    const todaySalesCount = todaySales.length;
+
+    const totalProducts = products.length;
+    const lowStockProducts = products.filter(p => p.quantity <= p.lowStockThreshold).sort((a,b) => a.quantity - b.quantity);
+
+    const employeeTodaySales = sales.filter(sale => 
+        sale.employeeId === user?.uid && isToday(new Date(sale.date))
+    );
+
+    const productsMap = new Map(products.map(p => [p.id, p]));
+    const calculateProfit = (sale: Sale) => {
+        return sale.items.reduce((currentSaleProfit, item) => {
+            const product = productsMap.get(item.productId);
+            const cost = product?.purchaseCost || 0;
+            return currentSaleProfit + ((item.salePrice - cost) * item.quantity);
+        }, 0);
+    }
+
+    const todayProfit = todaySales.reduce((totalProfit, sale) => totalProfit + calculateProfit(sale), 0);
+    
+    const recentSales = [...sales].sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0,5);
+
+    const salesForReview = sales.filter(s => s.needsReview === true);
+
+    const totalAccumulatedProfit = sales.reduce((totalProfit, sale) => totalProfit + calculateProfit(sale), 0);
+    const totalWithdrawals = outflows
+      .filter(o => o.type === 'withdrawal' && o.currency === 'NIO') 
+      .reduce((sum, o) => sum + o.amount, 0);
+      
+    const availableProfit = totalAccumulatedProfit - totalWithdrawals;
+
+    return { 
+        todayRevenue, todaySalesCount, totalProducts, lowStockProducts, 
+        employeeTodaySales, todayProfit,
+        recentSales, salesForReview,
+        availableProfit,
+    };
+
+  }, [sales, products, user, outflows]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col p-4 sm:p-6 lg:p-8 space-y-6">
+        <header>
+           <Skeleton className="h-8 w-48" />
+           <Skeleton className="h-4 w-72 mt-2" />
+        </header>
+        <main className="flex-1 space-y-6">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                <Skeleton className="h-28" />
+                <Skeleton className="h-28" />
+                <Skeleton className="h-28" />
+                <Skeleton className="h-28" />
+                <Skeleton className="h-28" />
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Skeleton className="h-64" />
+              <Skeleton className="h-64" />
+            </div>
+             <Skeleton className="h-48" />
+        </main>
+      </div>
+    );
+  }
+  
+  const unitLabels: Record<Product['stockingUnit'], string> = {
+    unidad: 'u',
+    lb: 'lb',
+    oz: 'oz',
+    L: 'L',
+    kg: 'kg',
+    qq: 'qq'
+  };
+
+  const welcomeMessage = user ? `Bienvenido de nuevo, ${user.name.split(' ')[0]}` : "Dashboard";
+  const welcomeDescription = "Aquí tienes un resumen de la actividad de tu tienda.";
+
+  const renderAdminDashboard = () => (
+    <>
+      <div className="grid gap-4 md:gap-6 sm:grid-cols-2 lg:grid-cols-5">
+        <StatCard
+          title="Ganancias Disponibles"
+          value={formatCurrency(availableProfit)}
+          icon={Wallet}
+          description="Capital que puedes retirar."
+          variant="info"
+        />
+        <StatCard
+          title="Ventas de Hoy (C$)"
+          value={formatCurrency(todayRevenue)}
+          icon={TrendingUp}
+          description={`${todaySalesCount} transacciones`}
+          variant="success"
+        />
+        <StatCard
+            title="Beneficio de Hoy"
+            value={formatCurrency(todayProfit)}
+            icon={DollarSign}
+            description="Ganancia neta estimada"
+            variant="success"
+        />
+        <StatCard
+          title="Total Productos"
+          value={totalProducts.toString()}
+          icon={Package}
+          description="Tipos de producto en inventario"
+          variant="info"
+        />
+        <StatCard
+          title="Ventas para Revisión"
+          value={salesForReview.length.toString()}
+          icon={Flag}
+          description={`Ventas marcadas por empleados`}
+          variant={salesForReview.length > 0 ? 'destructive' : 'info'}
+        />
+      </div>
+
+       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+            <Card className="lg:col-span-3 backdrop-blur-sm bg-background/50">
+                <CardHeader>
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                           <ShoppingCart className="text-primary h-5 w-5" />
+                           <CardTitle className="text-lg font-semibold">Últimas Ventas</CardTitle>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={() => router.push('/dashboard/sales')}>
+                            Ver Todas
+                            <Eye className="ml-2 h-4 w-4" />
+                        </Button>
+                    </div>
+                    <CardDescription>Un vistazo rápido a las transacciones más recientes.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                     {recentSales.length > 0 ? (
+                        <div className="space-y-4">
+                            {recentSales.map(sale => (
+                                <div key={sale.id} className="flex justify-between items-center hover:bg-muted/50 p-2 rounded-md transition-colors">
+                                    <div className="flex items-center gap-3">
+                                         <div className="p-2 bg-muted rounded-full">
+                                            <ShoppingCart className="h-4 w-4 text-muted-foreground"/>
+                                         </div>
+                                         <div>
+                                            <p className="font-medium text-sm truncate max-w-[200px]" title={sale.id}>Transacción #{sale.id.substring(0, 8)}...</p>
+                                            <p className="text-xs text-muted-foreground">
+                                                {formatDistanceToNow(new Date(sale.date), { addSuffix: true, locale: es })} por {sale.employeeName}
+                                            </p>
+                                         </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="font-bold text-sm">{formatCurrency(sale.grandTotal, sale.paymentCurrency)}</p>
+                                        <Badge variant={sale.paymentCurrency === 'USD' ? 'secondary' : 'outline'}>{sale.paymentCurrency}</Badge>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <div className="text-sm text-muted-foreground text-center py-8">
+                            <ShoppingCart className="mx-auto h-8 w-8 mb-2" />
+                            Aún no se han realizado ventas.
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+            <div className="lg:col-span-2 grid grid-cols-1 gap-6 auto-rows-min">
+              <Card className="backdrop-blur-sm bg-background/50">
+                  <CardHeader>
+                      <div className="flex items-center gap-2">
+                        <CardTitle className="text-lg font-semibold">Atajos</CardTitle>
+                      </div>
+                      <CardDescription>Navega rápidamente a las secciones principales.</CardDescription>
+                  </CardHeader>
+                  <CardContent className="grid grid-cols-2 gap-3 text-sm">
+                      <Link href="/dashboard/pos" passHref>
+                          <Button variant="outline" className="w-full justify-start h-12 text-base font-semibold hover:bg-primary/10 hover:scale-105 hover:border-primary transition-all duration-200">
+                              <ShoppingCart className="mr-2"/> Nueva Venta
+                          </Button>
+                      </Link>
+                       <Link href="/dashboard/orders" passHref>
+                          <Button variant="secondary" className="w-full justify-start h-12 text-base font-semibold hover:scale-105 transition-transform duration-200">
+                              <PackagePlus className="mr-2"/> Pedidos
+                          </Button>
+                      </Link>
+                       <Link href="/dashboard/inventory" passHref>
+                          <Button variant="secondary" className="w-full justify-start h-12 text-base font-semibold hover:scale-105 transition-transform duration-200">
+                              <Package className="mr-2"/> Inventario
+                          </Button>
+                      </Link>
+                       <Link href="/dashboard/reports" passHref>
+                          <Button variant="secondary" className="w-full justify-start h-12 text-base font-semibold hover:scale-105 transition-transform duration-200">
+                              <BarChart3 className="mr-2"/> Reportes
+                          </Button>
+                      </Link>
+                  </CardContent>
+              </Card>
+              <Card className="backdrop-blur-sm bg-background/50">
+                  <CardHeader>
+                      <div className="flex items-center gap-2">
+                        <AlertTriangle className="text-destructive h-5 w-5" />
+                        <CardTitle className="text-lg font-semibold">Productos con Stock Bajo</CardTitle>
+                      </div>
+                      <CardDescription>Estos productos necesitan reabastecimiento pronto.</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                      {lowStockProducts.length > 0 ? (
+                          <div className="space-y-4">
+                              {lowStockProducts.slice(0,2).map(p => (
+                                  <div key={p.id} className="flex justify-between items-center hover:bg-muted/50 p-2 rounded-md transition-colors">
+                                      <div>
+                                          <p className="font-medium">{p.name}</p>
+                                          <p className="text-sm text-muted-foreground">{formatCurrency(p.salePrice)}</p>
+                                      </div>
+                                      <Badge variant="destructive">{p.quantity} {unitLabels[p.stockingUnit] || p.stockingUnit} restantes</Badge>
+                                  </div>
+                              ))}
+                          </div>
+                      ) : (
+                          <div className="text-sm text-muted-foreground text-center py-8">
+                            <Package className="mx-auto h-8 w-8 mb-2" />
+                            ¡Excelente! No hay productos con bajo stock.
+                          </div>
+                      )}
+                  </CardContent>
+              </Card>
+            </div>
+      </div>
+      
+        {salesForReview.length > 0 && (
+             <Card className="backdrop-blur-sm bg-destructive/10 border-destructive">
+                <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-destructive">
+                    <Flag />
+                    Ventas Pendientes de Revisión
+                </CardTitle>
+                <CardDescription>
+                    Las siguientes ventas fueron marcadas por un empleado y necesitan tu atención.
+                </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead>ID Venta</TableHead>
+                                <TableHead>Empleado</TableHead>
+                                <TableHead>Fecha</TableHead>
+                                <TableHead className="text-right">Total</TableHead>
+                                <TableHead className="text-center">Acción</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                         <TableBody>
+                            <TooltipProvider>
+                                {salesForReview.map(sale => (
+                                    <Tooltip key={sale.id} delayDuration={100}>
+                                        <TableRow>
+                                            <TooltipTrigger asChild>
+                                                <TableCell className="font-mono text-xs cursor-help">{sale.id.substring(0,8)}...</TableCell>
+                                            </TooltipTrigger>
+                                            <TableCell>{sale.employeeName}</TableCell>
+                                            <TableCell>{format(new Date(sale.date), 'Pp', { locale: es })}</TableCell>
+                                            <TableCell className="text-right font-medium">{formatCurrency(sale.grandTotal, sale.paymentCurrency)}</TableCell>
+                                            <TableCell className="text-center">
+                                                <Button size="sm" onClick={() => router.push('/dashboard/sales')}>
+                                                    Revisar en Historial
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                        {sale.reviewNotes && (
+                                            <TooltipContent side="top" className="max-w-xs">
+                                                <p className="font-bold">Motivo de revisión:</p>
+                                                <p>{sale.reviewNotes}</p>
+                                            </TooltipContent>
+                                        )}
+                                    </Tooltip>
+                                ))}
+                            </TooltipProvider>
+                        </TableBody>
+                    </Table>
+                </CardContent>
+            </Card>
+        )}
+    </>
+  );
+
+  const renderEmployeeDashboard = () => (
+    <Card className="backdrop-blur-sm bg-background/50">
+      <CardHeader>
+        <CardTitle>Mis Ventas de Hoy</CardTitle>
+        <CardDescription>Un resumen de las ventas que has realizado hoy.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>ID de Transacción</TableHead>
+              <TableHead className="text-right">Total</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {employeeTodaySales.length > 0 ? (
+              employeeTodaySales.map(sale => (
+                <TableRow key={sale.id}>
+                  <TableCell className="font-medium truncate max-w-[200px]">{sale.id}</TableCell>
+                  <TableCell className="text-right">
+                    {formatCurrency(sale.grandTotal, sale.paymentCurrency)}
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={2} className="h-24 text-center">
+                  Aún no has realizado ninguna venta hoy.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+  );
+
+  return (
+    <div className="relative min-h-full w-full overflow-hidden flex flex-col">
+        {/* Animated background */}
+        <div className="absolute inset-0 -z-10 h-full w-full bg-white bg-[linear-gradient(to_right,#8080800a_1px,transparent_1px),linear-gradient(to_bottom,#8080800a_1px,transparent_1px)] bg-[size:14px_24px] dark:bg-neutral-950 dark:bg-[linear-gradient(to_right,#ffffff0d_1px,transparent_1px),linear-gradient(to_bottom,#ffffff0d_1px,transparent_1px)]">
+            <div className="absolute left-0 right-0 top-0 -z-10 m-auto h-[310px] w-[310px] rounded-full bg-blue-400 opacity-20 blur-[100px]"></div>
+        </div>
+
+      <div className="flex-1 flex flex-col p-4 sm:p-6 lg:p-8">
+        <header className="mb-6 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+                <SidebarTrigger className="hidden md:flex"/>
+                <div>
+                    <h1 className="text-3xl font-bold tracking-tight text-gray-900 dark:text-gray-50">
+                        {welcomeMessage}
+                    </h1>
+                    <p className="text-lg text-muted-foreground">
+                        {isAdmin 
+                        ? welcomeDescription
+                        : "Aquí tienes un resumen de tu actividad de hoy."
+                        }
+                    </p>
+                </div>
+            </div>
+            <p className="text-sm font-medium text-muted-foreground mt-2 sm:mt-0">
+                {currentDate}
+            </p>
+        </header>
+        <main className="flex-1 space-y-6">
+          {isAdmin ? renderAdminDashboard() : renderEmployeeDashboard()}
+        </main>
+      </div>
+    </div>
+  );
+}

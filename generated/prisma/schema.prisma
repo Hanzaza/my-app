@@ -1,0 +1,209 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// --- ENUMS PARA TYPE SAFETY ---
+
+enum Role {
+  admin
+  manager
+  employee
+}
+
+enum SaleStatus {
+  COMPLETED
+  PENDING
+  CANCELLED
+}
+
+enum FlowType {
+  INFLOW
+  OUTFLOW
+}
+
+// --- MODELOS ---
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users      User[]
+  products   Product[]
+  sales      Sale[]
+  inflows    CashInflow[]
+  outflows   CashOutflow[]
+  categories Category[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  role      Role     @default(employee)
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sales                Sale[]
+  cashFlows            CashFlow[]
+  inventoryAdjustments InventoryAdjustment[]
+
+  @@index([companyId])
+  @@index([email])
+}
+
+model Category {
+  id        String  @id @default(cuid())
+  name      String
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  products Product[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+model Product {
+  id        String  @id @default(cuid())
+  name      String
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  // Nombres actualizados para coincidir con tu frontend:
+  stockingUnit String
+  quantity     Decimal @default(0) @db.Decimal(10, 3)
+
+  // ¡AQUÍ ESTÁN LOS CAMPOS FALTANTES QUE DEBES AGREGAR!
+  purchaseCost      Decimal @default(0) @db.Decimal(10, 2)
+  salePrice         Decimal @default(0) @db.Decimal(10, 2)
+  lowStockThreshold Int     @default(10)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  saleUnits            SaleUnit[]
+  saleItems            SaleItem[]
+  inventoryAdjustments InventoryAdjustment[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+model SaleUnit {
+  id               String  @id @default(cuid())
+  productId        String
+  product          Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  unitName         String // e.g., 'gram', 'pound', 'portion'
+  price            Decimal @db.Decimal(10, 2)
+  conversionFactor Decimal @db.Decimal(10, 5) // e.g., 0.001 for gram to kg
+
+  saleItems SaleItem[]
+
+  @@unique([productId, unitName])
+  @@index([productId])
+}
+
+model Sale {
+  id          String     @id @default(cuid())
+  companyId   String
+  company     Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User       @relation(fields: [userId], references: [id])
+  totalAmount Decimal    @db.Decimal(10, 2)
+  status      SaleStatus @default(COMPLETED)
+  saleDate    DateTime   @default(now())
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  items SaleItem[]
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([saleDate])
+}
+
+model SaleItem {
+  id           String   @id @default(cuid())
+  saleId       String
+  sale         Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id])
+  saleUnitId   String
+  saleUnit     SaleUnit @relation(fields: [saleUnitId], references: [id])
+  quantitySold Decimal  @db.Decimal(10, 3)
+  priceAtSale  Decimal  @db.Decimal(10, 2)
+
+  @@index([saleId])
+  @@index([productId])
+}
+
+model InventoryAdjustment {
+  id            String   @id @default(cuid())
+  productId     String
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userId        String // Agregado para saber quién hizo el ajuste
+  user          User     @relation(fields: [userId], references: [id])
+  adjustmentQty Decimal  @db.Decimal(10, 3)
+  reason        String // 'loss', 'damage', 'recount', etc.
+  createdAt     DateTime @default(now())
+
+  @@index([productId])
+  @@index([userId])
+}
+
+model CashFlow {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  type        FlowType // INFLOW u OUTFLOW
+  amount      Decimal  @db.Decimal(10, 2)
+  description String?
+  createdAt   DateTime @default(now())
+
+  inflow  CashInflow?
+  outflow CashOutflow?
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model CashInflow {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  cashFlowId String   @unique
+  cashFlow   CashFlow @relation(fields: [cashFlowId], references: [id], onDelete: Cascade)
+  method     String // 'cash_sale', 'transfer', 'loan', etc.
+  createdAt  DateTime @default(now())
+
+  @@index([companyId])
+}
+
+model CashOutflow {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  cashFlowId String   @unique
+  cashFlow   CashFlow @relation(fields: [cashFlowId], references: [id], onDelete: Cascade)
+  method     String // 'withdrawal', 'payment', 'transfer', etc.
+  createdAt  DateTime @default(now())
+
+  @@index([companyId])
+}

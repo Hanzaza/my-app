@@ -1,0 +1,109 @@
+
+"use client";
+
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableFooter,
+} from "@/components/ui/table";
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
+import { Button } from "../ui/button";
+import { Printer } from "lucide-react";
+
+export type ReportSaleItem = {
+  id: string; // Transaction ID
+  productName: string;
+  quantity: number;
+  salePrice: number;
+  purchaseCost: number;
+  total: number;
+  profit: number;
+  date: string;
+};
+
+interface ReportTableProps {
+  sales: ReportSaleItem[];
+  onPrintReceipt: (saleId: string) => void;
+}
+
+export function ReportTable({ sales, onPrintReceipt }: ReportTableProps) {
+  const totalRevenue = sales.reduce((acc, sale) => acc + sale.total, 0);
+  const totalProfit = sales.reduce((acc, sale) => acc + sale.profit, 0);
+
+  const formatCurrency = (amount: number) =>
+    new Intl.NumberFormat("es-NI", {
+      style: "currency",
+      currency: "NIO",
+    }).format(amount);
+
+  const formatDate = (dateString: string) => {
+    return format(new Date(dateString), "Pp", { locale: es });
+  };
+
+  return (
+    <div className="rounded-lg border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Producto</TableHead>
+            <TableHead className="text-center">Cantidad</TableHead>
+            <TableHead className="text-right">Venta</TableHead>
+            <TableHead className="text-right">Beneficio</TableHead>
+            <TableHead>Fecha</TableHead>
+            <TableHead className="text-center">Acción</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {sales.length > 0 ? (
+            sales.map((sale, index) => (
+              <TableRow key={`${sale.id}-${index}`}>
+                <TableCell className="font-medium">{sale.productName}</TableCell>
+                <TableCell className="text-center">{sale.quantity}</TableCell>
+                <TableCell className="text-right">
+                  {formatCurrency(sale.total)}
+                </TableCell>
+                <TableCell className="text-right text-green-600 dark:text-green-500">
+                  {formatCurrency(sale.profit)}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  {formatDate(sale.date)}
+                </TableCell>
+                <TableCell className="text-center">
+                    <Button variant="ghost" size="sm" onClick={() => onPrintReceipt(sale.id)}>
+                        <Printer className="mr-2 h-4 w-4"/>
+                        Recibo
+                    </Button>
+                </TableCell>
+              </TableRow>
+            ))
+          ) : (
+            <TableRow>
+              <TableCell colSpan={6} className="h-24 text-center">
+                No hay ventas en el rango de fechas seleccionado.
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+        <TableFooter>
+          <TableRow className="bg-muted/50">
+            <TableCell colSpan={2} className="text-right font-bold">
+              Totales del Período
+            </TableCell>
+            <TableCell className="text-right font-bold">
+              {formatCurrency(totalRevenue)}
+            </TableCell>
+            <TableCell className="text-right font-bold text-green-700 dark:text-green-400">
+              {formatCurrency(totalProfit)}
+            </TableCell>
+            <TableCell colSpan={2} />
+          </TableRow>
+        </TableFooter>
+      </Table>
+    </div>
+  );
+}

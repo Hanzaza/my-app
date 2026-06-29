@@ -1,0 +1,117 @@
+
+
+"use client";
+
+import { useState } from "react";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion"
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Edit, Flag } from "lucide-react";
+
+import { Sale, Product } from "@/lib/types";
+import { SalesHistoryTable } from "./sales-history-table";
+import { EditSaleForm } from "./edit-sale-form";
+import { cn } from "@/lib/utils";
+
+interface SalesHistoryAccordionProps {
+  sales: Sale[];
+  products: Product[];
+  onUpdateSale: (updatedSale: Sale, originalSale: Sale) => void;
+  isLoading?: boolean;
+}
+
+export function SalesHistoryAccordion({ sales, products, onUpdateSale, isLoading }: SalesHistoryAccordionProps) {
+  const [editingSale, setEditingSale] = useState<Sale | null>(null);
+
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleString('es-NI', {
+      dateStyle: 'long',
+      timeStyle: 'short',
+    });
+  };
+
+  const sortedSales = [...sales].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  if (sortedSales.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center text-center p-8 border rounded-lg h-64">
+        <h3 className="text-xl font-semibold">No hay ventas registradas</h3>
+        <p className="text-muted-foreground mt-2">
+          Realiza una venta desde la sección "Punto de Venta" para verla aquí.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <Accordion type="single" collapsible className="w-full space-y-2">
+        {sortedSales.map((sale) => (
+          <AccordionItem 
+            value={sale.id} 
+            key={sale.id} 
+            className={cn(
+                "border rounded-lg px-4 bg-card",
+                sale.needsReview && "bg-destructive/10 border-destructive"
+            )}
+            >
+            <div className="flex justify-between items-center w-full">
+                <AccordionTrigger className="hover:no-underline flex-1 py-4">
+                  <div className="flex justify-between items-center w-full">
+                    <div className="text-left flex items-center gap-3">
+                      {sale.needsReview && <Flag className="h-5 w-5 text-destructive" />}
+                      <div>
+                        <p className="font-semibold truncate max-w-[150px] sm:max-w-xs">Transacción: {sale.id.substring(0,8)}...</p>
+                        <p className="text-sm text-muted-foreground">{formatDate(sale.date)} por {sale.employeeName}</p>
+                      </div>
+                    </div>
+                  </div>
+                </AccordionTrigger>
+                 <div className="flex items-center gap-4 pl-4" onClick={(e) => e.stopPropagation()}>
+                    <p className="font-semibold text-lg">
+                        {new Intl.NumberFormat("es-NI", {
+                        style: "currency",
+                        currency: sale.paymentCurrency,
+                        }).format(sale.grandTotal)}
+                    </p>
+                    <Button variant="ghost" size="icon" onClick={() => {
+                      setEditingSale(sale);
+                    }}>
+                        <Edit className="h-4 w-4" />
+                    </Button>
+                </div>
+            </div>
+            <AccordionContent className="pt-2">
+              <SalesHistoryTable items={sale.items} />
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
+
+      <Dialog open={!!editingSale} onOpenChange={(isOpen) => !isOpen && setEditingSale(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Editar Transacción</DialogTitle>
+            <DialogDescription>
+              Ajusta las cantidades o elimina productos. El stock y la caja se ajustarán automáticamente.
+            </DialogDescription>
+          </DialogHeader>
+          {editingSale && (
+            <EditSaleForm 
+              sale={editingSale} 
+              products={products}
+              onSubmit={onUpdateSale} 
+              onClose={() => setEditingSale(null)}
+              isSubmitting={isLoading} 
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
